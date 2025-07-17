@@ -1,33 +1,31 @@
 import streamlit as st
 import plotly.express as px
-from utils import query_region, preprocess
+from query_engine import query_region
+from processor import preprocess, filter_cmd
+from config import targets
 
 st.set_page_config(page_title="CMDExplorer", layout="wide")
-st.title("Color-Magnitude Diagram Explorer")
-st.markdown("Explore stellar populations by region using live Gaia data.")
+st.title("Plug-and-Play CMD Explorer")
 
-# Region selector
-ra = st.number_input("RA (deg)", value=56.75)
-dec = st.number_input("Dec (deg)", value=24.12)
-radius = st.slider("Search Radius (°)", 0.1, 5.0, 1.0)
+target = st.selectbox("Choose Region", options=list(targets.keys()))
+params = targets[target]
 
-if st.button("Fetch Data"):
-    with st.spinner("Querying Gaia Archive..."):
-        df = preprocess(query_region(ra, dec, radius))
-        st.success(f"{len(df):,} stars loaded!")
+if st.button("Load Stars"):
+    with st.spinner("Fetching Gaia stars..."):
+        df_raw = query_region(params['ra'], params['dec'], params['radius'])
+        if df_raw.empty:
+            st.error("No stars found. Try another region or smaller radius.")
+        else:
+            df = preprocess(df_raw)
+            st.success(f"{len(df):,} stars loaded.")
 
-        # Filters
-        mag_min, mag_max = st.slider("Absolute Magnitude", -5.0, 15.0, (-5.0, 15.0))
-        color_min, color_max = st.slider("BP-RP Color", -0.5, 3.0, (-0.5, 3.0))
+            color_range = st.slider("BP-RP Color Range", -0.5, 3.0, (-0.5, 3.0))
+            mag_range = st.slider("Absolute Magnitude Range", -5.0, 15.0, (-5.0, 15.0))
+            df_filtered = filter_cmd(df, color_range, mag_range)
 
-        filtered_df = df[df['abs_mag'].between(mag_min, mag_max) &
-                         df['bp_rp'].between(color_min, color_max)]
-
-        fig = px.scatter(
-            filtered_df, x="bp_rp", y="abs_mag",
-            hover_data=["source_id", "ra", "dec", "parallax"],
-            title="Gaia CMD",
-            labels={"bp_rp": "BP-RP Color", "abs_mag": "Absolute Magnitude"},
-        )
-        fig.update_layout(yaxis=dict(autorange="reversed"))
-        st.plotly_chart(fig, use_container_width=True)
+            fig = px.scatter(df_filtered, x='bp_rp', y='abs_mag',
+                             hover_data=["source_id", "ra", "dec"],
+                             labels={'bp_rp': 'Color (BP-RP)', 'abs_mag': 'Absolute Magnitude'},
+                             title=f"{target} CMD")
+            fig.update_layout(yaxis=dict(autorange="reversed"))
+            st.plotly_chart(fig, use_container_width=True)
